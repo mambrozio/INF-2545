@@ -15,5 +15,7 @@ loop do
     else
         emit LED2(OFF);
     end
+
+	await 100ms;
 end
 
