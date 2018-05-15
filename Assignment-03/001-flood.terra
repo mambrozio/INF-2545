@@ -35,19 +35,24 @@ else //everyone else
     currentFlood.route = initialRoute;
     currentFlood.jumps = 0;
     currentFlood.source = id;
+    var ushort tv;
     loop do
         rec = await RECEIVE;
-        if rec.route > currentFlood.route then // send to others
-            emit LEDS(currentFlood.route); //DEBUG
-            currentFlood.origin = rec.origin;
-            currentFlood.jumps = rec.jumps + 1;
-            currentFlood.route = rec.route;
-            currentFlood.target = BROADCAST;
-            emit SEND(currentFlood);
-            await SEND_DONE;
-            await 2s; //DEBUG
-            emit LEDS(currentFlood.route); //DEBUG
-        end
+        emit REQ_TEMP(); //DEBUG
+        tv = await TEMP; //DEBUG
+        if tv <= 500 then //DEBUG
+            if rec.route > currentFlood.route then // send to others
+                emit LEDS(currentFlood.route); //DEBUG
+                currentFlood.origin = rec.origin;
+                currentFlood.jumps = rec.jumps + 1;
+                currentFlood.route = rec.route;
+                currentFlood.target = BROADCAST;
+                emit SEND(currentFlood);
+                await SEND_DONE;
+                await 2s; //DEBUG
+                emit LEDS(currentFlood.route); //DEBUG
+            end
+        end //DEBUG
     end
 end
 
