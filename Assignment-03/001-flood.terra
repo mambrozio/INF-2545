@@ -27,6 +27,7 @@ if id == 11 then //Is gateway
         emit LEDS(1);
         await 10s;
         emit LEDS(0);
+        currentFlood.route = currentFlood.route + 1;
     end
 else //everyone else
     //respond to flood
@@ -34,15 +35,18 @@ else //everyone else
     currentFlood.route = initialRoute;
     currentFlood.jumps = 0;
     currentFlood.source = id;
-    currentFlood.target = BROADCAST;
     loop do
         rec = await RECEIVE;
         if rec.route > currentFlood.route then // send to others
+            emit LEDS(currentFlood.route); //DEBUG
             currentFlood.origin = rec.origin;
             currentFlood.jumps = rec.jumps + 1;
-            emit LEDS(currentFlood.origin); //DEBUG
+            currentFlood.route = rec.route;
+            currentFlood.target = BROADCAST;
             emit SEND(currentFlood);
             await SEND_DONE;
+            await 2s; //DEBUG
+            emit LEDS(currentFlood.route); //DEBUG
         end
     end
 end
