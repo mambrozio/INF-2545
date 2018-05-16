@@ -23,8 +23,8 @@ var alarmMsg alr;
 
 if id == 11 then //Is gateway
     currentFlood.route = initialRoute;
-    loop do
-        par/or do
+    par do
+        loop do
             //flood every 10s
             currentFlood.origin = id;
             currentFlood.route = currentFlood.route + 1;
@@ -35,8 +35,10 @@ if id == 11 then //Is gateway
             emit LEDS(7);
             emit SEND(currentFlood);
             await SEND_DONE;
-            await 10s;
-        with
+            await 1min;
+        end
+    with
+        loop do
             // receive alarm msg
             alr = await RECEIVE(ALARM_TYPE);
             emit LEDS(1);
@@ -52,8 +54,8 @@ else //everyone else
     var alarmMsg myAlarm;
     var ushort tv;
     var ushort pv; //DEBUG
-    loop do
-        par/or do
+    par do
+        loop do
             rec = await RECEIVE(FLOOD_TYPE);
             emit REQ_PHOTO(); //DEBUG
             pv = await PHOTO; //DEBUG
@@ -70,13 +72,17 @@ else //everyone else
                     emit LEDS(currentFlood.route); //DEBUG
                 end
             end //DEBUG
-        with
+        end
+    with
+        loop do
             alr = await RECEIVE(ALARM_TYPE);
             alr.type = ALARM_TYPE;
             alr.target = currentFlood.origin;
             emit SEND(alr);
             await SEND_DONE;
-        with
+        end
+    with
+        loop do
             emit REQ_TEMP();
             tv = await TEMP;
 
@@ -85,13 +91,14 @@ else //everyone else
                 myAlarm.source = id;
                 myAlarm.temp = tv;
                 myAlarm.node = id;
+                myAlarm.type = ALARM_TYPE;
                 myAlarm.target = currentFlood.origin;
                 emit SEND(myAlarm);
                 await SEND_DONE;
             else
                 emit LED2(OFF);
             end
-	        await 1s;
+            await 1s;
         end
     end
 end
