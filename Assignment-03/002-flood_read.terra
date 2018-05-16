@@ -1,0 +1,98 @@
+#include "/home/terra/TerraNG/terra/TerraNet.defs"
+
+#define FLOOD_TYPE 3
+#define ALARM_TYPE 5
+
+var ushort id = getNodeId();
+
+var ushort initialRoute = 0;
+
+pktype floodMsg from radioMsg with
+    var ushort origin; // parent node id
+    var ushort route;  // current known route
+    var ushort jumps;  // current number of jumps to root
+end
+
+pktype alarmMsg from radioMsg with
+    var ushort node; // node that measured the temp value
+    var ushort temp; // temperature value
+end
+
+var floodMsg currentFlood;
+var alarmMsg alr;
+
+if id == 11 then //Is gateway
+    currentFlood.route = initialRoute;
+    loop do
+        par/or do
+            //flood every 10s
+            currentFlood.origin = id;
+            currentFlood.route = currentFlood.route + 1;
+            currentFlood.jumps = 0;
+            currentFlood.source = id;
+            currentFlood.type = FLOOD_TYPE;
+            currentFlood.target = BROADCAST;
+            emit LEDS(7);
+            emit SEND(currentFlood);
+            await SEND_DONE;
+            await 10s;
+        with
+            // receive alarm msg
+            alr = await RECEIVE(ALARM_TYPE);
+            emit LEDS(1);
+            await 2s;
+            emit LEDS(0);
+        end
+    end
+else //everyone else
+    //respond to flood
+    currentFlood.route = initialRoute;
+    currentFlood.source = id;
+    var floodMsg rec;
+    var alarmMsg myAlarm;
+    var ushort tv;
+    var ushort pv; //DEBUG
+    loop do
+        par/or do
+            rec = await RECEIVE(FLOOD_TYPE);
+            emit REQ_PHOTO(); //DEBUG
+            pv = await PHOTO; //DEBUG
+            if pv <= 400 then //DEBUG
+                if rec.route > currentFlood.route then // send to others
+                    emit LEDS(currentFlood.route); //DEBUG
+                    currentFlood.origin = rec.source;
+                    currentFlood.jumps = rec.jumps + 1;
+                    currentFlood.route = rec.route;
+                    currentFlood.type = FLOOD_TYPE;
+                    currentFlood.target = BROADCAST;
+                    emit SEND(currentFlood);
+                    await SEND_DONE;
+                    emit LEDS(currentFlood.route); //DEBUG
+                end
+            end //DEBUG
+        with
+            alr = await RECEIVE(ALARM_TYPE);
+            alr.type = ALARM_TYPE;
+            alr.target = currentFlood.origin;
+            emit SEND(alr);
+            await SEND_DONE;
+        with
+            emit REQ_TEMP();
+            tv = await TEMP;
+
+            if tv > 500 then
+                emit LED2(ON);
+                myAlarm.source = id;
+                myAlarm.temp = tv;
+                myAlarm.node = id;
+                myAlarm.target = currentFlood.origin;
+                emit SEND(myAlarm);
+                await SEND_DONE;
+            else
+                emit LED2(OFF);
+            end
+	        await 1s;
+        end
+    end
+end
+
