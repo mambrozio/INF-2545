@@ -53,6 +53,9 @@ if id == 11 then //Is gateway
             await Q_READY;
             loop do
                 stat = qGet(alr);
+                alr.target = 1;
+                emit SEND(alr);
+                await SEND_DONE;
                 emit LEDS(4);
                 await 2s;
                 emit LEDS(0);
