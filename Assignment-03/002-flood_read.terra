@@ -21,11 +21,21 @@ end
 var floodMsg currentFlood;
 var alarmMsg alr;
 
+var ubyte stat;
+
 if id == 11 then //Is gateway
     currentFlood.route = initialRoute;
     par do
         loop do
-            //flood every 10s
+            alr = await RECEIVE(ALARM_TYPE);
+            stat = qPut(alr);
+            emit LEDS(7);
+            await 1s;
+            emit LEDS(0);
+        end
+    with
+        loop do
+            //flood every 1min
             currentFlood.origin = id;
             currentFlood.route = currentFlood.route + 1;
             currentFlood.jumps = 0;
@@ -35,15 +45,21 @@ if id == 11 then //Is gateway
             emit LEDS(7);
             emit SEND(currentFlood);
             await SEND_DONE;
+            emit LEDS(0);
             await 1min;
         end
     with
         loop do
-            // receive alarm msg
-            alr = await RECEIVE(ALARM_TYPE);
-            emit LEDS(1);
-            await 2s;
-            emit LEDS(0);
+            await Q_READY;
+            loop do
+                stat = qGet(alr);
+                emit LEDS(4);
+                await 2s;
+                emit LEDS(0);
+                if qSize() == 0 then
+                    break;
+                end
+            end
         end
     end
 else //everyone else
@@ -76,10 +92,21 @@ else //everyone else
     with
         loop do
             alr = await RECEIVE(ALARM_TYPE);
-            alr.type = ALARM_TYPE;
-            alr.target = currentFlood.origin;
-            emit SEND(alr);
-            await SEND_DONE;
+            stat = qPut(alr);
+        end
+    with
+        loop do
+            await Q_READY;
+            loop do
+                stat = qGet(alr);
+                alr.type = ALARM_TYPE;
+                alr.target = currentFlood.origin;
+                emit SEND(alr);
+                await SEND_DONE;
+                if qSize() == 0 then
+                    break;
+                end
+            end
         end
     with
         loop do
@@ -98,7 +125,7 @@ else //everyone else
             else
                 emit LED2(OFF);
             end
-            await 1s;
+            await 10s;
         end
     end
 end
