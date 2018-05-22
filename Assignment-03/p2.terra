@@ -3,11 +3,6 @@
 #define FLOOD_TYPE 3
 #define ALARM_TYPE 5
 
-var ushort maximum_temperature = 510;
-var ushort id = getNodeId();
-
-var ushort initial_route = 0;
-
 pktype floodMessage from radioMsg with
     var ushort origin; // parent node id
     var ushort route;  // known route
@@ -19,8 +14,16 @@ pktype alarmMessage from radioMsg with
     var ushort temperature; // temperature value
 end
 
-var alarmMessage alarm;
+pktype echoMessage from radioMsg with
+    var ushort id;
+    var ushort[9] successors;
+    var ushort count;
+end
 
+var ushort maximum_temperature = 510;
+var ushort initial_route = 0;
+var ushort id = getNodeId();
+var alarmMessage alarm;
 var ubyte queue;
 
 // ----------------------------------------
@@ -111,9 +114,20 @@ par do
             emit SEND(probe);
             await SEND_DONE;
             // emit LEDS(probe.route); // DEBUG
+
+            // espera pelas respostas dos sucessores
+            par/or do
+                // TODO: envia pro progenitor
+            with
+                await 10s;
+            end
+            // ou espera 10s
         end
         // end // DEBUG
     end
+with
+    // receives echos from a successor
+    // TODO
 with
     // waits for an alarm 
     loop do
@@ -121,7 +135,7 @@ with
         queue = qPut(alarm);
     end
 with
-    // processes an alarm from the queue 
+    // processes an alarm from the queue
     loop do
         await Q_READY;
         loop do
