@@ -1,7 +1,22 @@
 #include "/home/terra/TerraNG/terra/TerraNet.defs"
 
-#define FLOOD_TYPE 3
-#define ALARM_TYPE 5
+#define FLOOD_TYPE   3
+#define ALARM_TYPE   5
+#define TEMPERATURE_REQUEST 7
+#define ECHO_TEMPERATURE    9
+
+// macros for leds
+#define RED    1
+#define GREEN  2
+#define YELLOW 4
+#define ALL    7
+#define BLINK(led) emit LEDS(led); await 1s; emit LEDS(OFF);
+
+// macro: blinks and sends a message
+#define LED_SEND(led, message) \
+    BLINK(led); \
+    emit SEND(message); \
+    await SEND_DONE; \
 
 pktype floodMessage from radioMsg with
     var ushort origin; // parent node id
@@ -14,10 +29,13 @@ pktype alarmMessage from radioMsg with
     var ushort temperature; // temperature value
 end
 
-pktype echoMessage from radioMsg with
-    var ushort id;
-    var ushort[9] successors;
-    var ushort count;
+pktype requestMessage from radioMsg with
+    var ushort destination;
+end
+
+pktype echoMessage from radioMsg with 
+    var ushort id;            // id from echo node
+    var ushort[9] successors; // successors of that node (stop at 0)
 end
 
 var ushort maximum_temperature = 510;
@@ -25,6 +43,9 @@ var ushort initial_route = 0;
 var ushort id = getNodeId();
 var alarmMessage alarm;
 var ubyte queue;
+
+// TODO successors
+var ushort[9][9] successors;
 
 // ----------------------------------------
 //
@@ -37,9 +58,37 @@ par do
     loop do 
         alarm = await RECEIVE(ALARM_TYPE);
         queue = qPut(alarm);
-        emit LEDS(7);
-        await 1s;
-        emit LEDS(0);
+    end
+with
+    // processes an alarm from the queue 
+    loop do
+        await Q_READY;
+        loop do
+            queue = qGet(alarm);
+            alarm.target = 1;
+            emit SEND(alarm);
+            await SEND_DONE;
+            BLINK(ALL);
+            if qSize() == 0 then
+                break;
+            end
+        end
+    end
+with
+    // sends request temperature message
+    // (if photo value is higher than 500)
+    loop do
+        emit REQ_PHOTO();
+        var ushort value = await PHOTO;
+        if value > 400 then
+            var requestMessage request;
+            request.destination = 12; // arbitrary
+            request.source = id;
+            request.type = TEMPERATURE_REQUEST;
+            request.target = 12; // TODO
+            LED_SEND(ALL, request);
+        end
+        await 5s;
     end
 with
     // sends flood probe every 1 minute
@@ -57,23 +106,6 @@ with
         await SEND_DONE;
         emit LEDS(0);
         await 1min;
-    end
-with
-    // processes an alarm from the queue 
-    loop do
-        await Q_READY;
-        loop do
-            queue = qGet(alarm);
-            alarm.target = 1;
-            emit SEND(alarm);
-            await SEND_DONE;
-            emit LEDS(4);
-            await 2s;
-            emit LEDS(0);
-            if qSize() == 0 then
-                break;
-            end
-        end
     end
 end
 
@@ -116,18 +148,28 @@ par do
             // emit LEDS(probe.route); // DEBUG
 
             // espera pelas respostas dos sucessores
-            par/or do
-                // TODO: envia pro progenitor
-            with
-                await 10s;
-            end
+            //par/or do
+            //    // TODO: envia pro progenitor
+            //with
+            //    await 10s;
+            //end
             // ou espera 10s
         end
         // end // DEBUG
     end
 with
-    // receives echos from a successor
-    // TODO
+    // waits for a temperature request 
+    loop do
+        // TODO request = ...
+        await RECEIVE(TEMPERATURE_REQUEST);
+        var alarmMessage alarm;
+        alarm.node = id;
+        alarm.temperature = 27; // TODO
+        alarm.source = id;
+        alarm.type = ALARM_TYPE;
+        alarm.target = alarm_destination;
+        LED_SEND(RED, alarm);
+    end
 with
     // waits for an alarm 
     loop do
