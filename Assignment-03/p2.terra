@@ -1,0 +1,163 @@
+#include "/home/terra/TerraNG/terra/TerraNet.defs"
+
+#define FLOOD_TYPE 3
+#define ALARM_TYPE 5
+
+var ushort maximum_temperature = 510;
+var ushort id = getNodeId();
+
+var ushort initial_route = 0;
+
+pktype floodMessage from radioMsg with
+    var ushort origin; // parent node id
+    var ushort route;  // known route
+    var ushort jumps;  // number of jumps to root
+end
+
+pktype alarmMessage from radioMsg with
+    var ushort node;        // node that measured the temperature value
+    var ushort temperature; // temperature value
+end
+
+var alarmMessage alarm;
+
+var ubyte queue;
+
+// ----------------------------------------
+//
+if id == 11 then // gateway 
+//
+// ----------------------------------------
+
+par do
+    // waits for an alarm
+    loop do 
+        alarm = await RECEIVE(ALARM_TYPE);
+        queue = qPut(alarm);
+        emit LEDS(7);
+        await 1s;
+        emit LEDS(0);
+    end
+with
+    // sends flood probe every 1 minute
+    var floodMessage probe;
+    probe.route = initial_route;
+    loop do
+        probe.origin = id;
+        probe.route = probe.route + 1;
+        probe.jumps = 0;
+        probe.source = id;
+        probe.type = FLOOD_TYPE;
+        probe.target = BROADCAST;
+        emit LEDS(7);
+        emit SEND(probe);
+        await SEND_DONE;
+        emit LEDS(0);
+        await 1min;
+    end
+with
+    // processes an alarm from the queue 
+    loop do
+        await Q_READY;
+        loop do
+            queue = qGet(alarm);
+            alarm.target = 1;
+            emit SEND(alarm);
+            await SEND_DONE;
+            emit LEDS(4);
+            await 2s;
+            emit LEDS(0);
+            if qSize() == 0 then
+                break;
+            end
+        end
+    end
+end
+
+// ----------------------------------------
+//
+else // regular nodes
+//
+// ----------------------------------------
+    
+var ushort alarm_destination = 0;
+var ushort current_route = initial_route;
+// var ushort pv; // DEBUG
+
+par do
+    // receives and propagates the flood probes
+    loop do
+        // received probe
+        var floodMessage received;
+        received = await RECEIVE(FLOOD_TYPE);
+        
+        // emit REQ_PHOTO(); // DEBUG
+        // pv = await PHOTO; // DEBUG
+        // if pv <= 400 then // DEBUG
+
+        // sends a probe forward
+        if received.route > current_route then
+            // emit LEDS(probe.route); // DEBUG
+            current_route = received.route;
+            alarm_destination = received.source;
+
+            var floodMessage probe;
+            probe.origin = received.source;
+            probe.route = received.route;
+            probe.jumps = received.jumps + 1;
+            probe.source = id;
+            probe.type = FLOOD_TYPE;
+            probe.target = BROADCAST;
+            emit SEND(probe);
+            await SEND_DONE;
+            // emit LEDS(probe.route); // DEBUG
+        end
+        // end // DEBUG
+    end
+with
+    // waits for an alarm 
+    loop do
+        alarm = await RECEIVE(ALARM_TYPE);
+        queue = qPut(alarm);
+    end
+with
+    // processes an alarm from the queue 
+    loop do
+        await Q_READY;
+        loop do
+            queue = qGet(alarm);
+            alarm.type = ALARM_TYPE;
+            alarm.target = alarm_destination;
+            emit SEND(alarm);
+            await SEND_DONE;
+            if qSize() == 0 then
+                break;
+            end
+        end
+    end
+with
+    // calculates the temperature every 5 seconds
+    // sends an alarm if necessary
+    loop do
+        emit REQ_TEMP();
+        var ushort temperature;
+        temperature = await TEMP;
+        if temperature >= maximum_temperature then
+            emit LED2(ON);
+            var alarmMessage temperature_alarm;
+            temperature_alarm.node = id;
+            temperature_alarm.temperature = temperature;
+            temperature_alarm.source = id;
+            temperature_alarm.type = ALARM_TYPE;
+            temperature_alarm.target = alarm_destination;
+            emit SEND(temperature_alarm);
+            await SEND_DONE;
+        else
+            emit LED2(OFF);
+        end
+        await 5s;
+    end
+end
+
+end // node if-else
+
