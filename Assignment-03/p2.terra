@@ -1,9 +1,9 @@
 #include "/home/terra/TerraNG/terra/TerraNet.defs"
 
-#define FLOOD_TYPE   3
-#define ALARM_TYPE   5
-#define TEMPERATURE_REQUEST 7
-#define ECHO_TEMPERATURE    9
+#define FLOOD_TYPE          3
+#define ALARM_TYPE          5
+#define ECHO                7
+#define TEMPERATURE_REQUEST 9
 
 // macros for leds
 #define RED    1
@@ -56,18 +56,20 @@ var ubyte queue;
 
 #define J(n)         (n%10)        // column in the grid
 #define I(n)         ((n-J(n))/10) // row in the grid
-#define SUCCESSOR(n) successors[GRID_WIDTH * (I(n)-1) + (J(n)-1)]
+#define INDEX(n)     (GRID_WIDTH * (I(n)-1) + (J(n)-1))
+#define SUCCESSOR(n) successors[INDEX(n)]
+
+#define INVALID_SUCCESSOR(s) (s == UNREACHABLE or s == SELF or s == PARENT)
 
 var ushort[SUCCESSORS_SIZE] successors;
 loop i, SUCCESSORS_SIZE do
     successors[i] = UNREACHABLE;
 end
 SUCCESSOR(id) = SELF;
-SUCCESSOR(12) = id;
 
 // ----------------------------------------
 //
-if id == 11 then // gateway 
+if id == 11 then // gateway
 //
 // ----------------------------------------
 
@@ -104,17 +106,15 @@ with
             request.source = id;
             request.type = TEMPERATURE_REQUEST;
             
-            var ushort node = SUCCESSOR(request.destination);
-            if node == UNREACHABLE then // invalid
+            var ushort successor = SUCCESSOR(request.destination);
+            if INVALID_SUCCESSOR(successor) then
                 return 1;
-            else/if node == SELF then   // invalid
-                return 1;
-            else/if node == PARENT then // invalid
-                return 1;
-            else/if node == id then // the target is one of my direct successors
+            else/if successor == id then
+                // the target is one of my direct successors
                 request.target = request.destination;
-            else                    // the target is reachable through "node"
-                request.target = node;
+            else
+                // the target is reachable through the successor
+                request.target = successor;
             end
 
             LED_SEND(ALL, request);
@@ -191,20 +191,42 @@ par do
 with
     // waits for a temperature request 
     loop do
-        // TODO request = ...
-        await RECEIVE(TEMPERATURE_REQUEST);
-        var alarmMessage alarm;
-        alarm.node = id;
-        alarm.temperature = 27; // TODO
-        alarm.source = id;
-        alarm.type = ALARM_TYPE;
-        alarm.target = alarm_destination;
-        LED_SEND(RED, alarm);
+        var requestMessage request = await RECEIVE(TEMPERATURE_REQUEST);
+        
+        if request.destination == id then // reached destination
+            var alarmMessage alarm;
+            alarm.node = id;
+            alarm.temperature = 27; // TODO
+            alarm.source = id;
+            alarm.type = ALARM_TYPE;
+            alarm.target = alarm_destination;
+            LED_SEND(RED, alarm);
+        else // must send the request forward
+            var ushort successor = SUCCESSOR(request.destination);
+            if INVALID_SUCCESSOR(successor) then
+                return 1;
+            else/if successor == id then
+                // the target is one of my direct successors
+                request.target = request.destination;
+            else
+                // the target is reachable through the successor
+                request.target = successor;
+            end
+            request.source = id;
+            LED_SEND(ALL, request);
+        end
+    end
+with
+    // TODO ???
+    // waits for the echo message
+    loop do
+        var echoMessage echo;
+        received = await RECEIVE(FLOOD_TYPE);
     end
 with
     // waits for an alarm 
     loop do
-        alarm = await RECEIVE(ALARM_TYPE);
+        var echoMessage echo = await RECEIVE(ECHO_TYPE);
         queue = qPut(alarm);
     end
 with
