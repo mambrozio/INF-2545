@@ -38,14 +38,32 @@ pktype echoMessage from radioMsg with
     var ushort[9] successors; // successors of that node (stop at 0)
 end
 
+// auxiliary variables
 var ushort maximum_temperature = 510;
 var ushort initial_route = 0;
 var ushort id = getNodeId();
 var alarmMessage alarm;
 var ubyte queue;
 
-// TODO successors
-var ushort[9][9] successors;
+// successor table
+#define UNREACHABLE 0
+#define SELF        1
+#define PARENT      2
+
+#define GRID_WIDTH      4
+#define GRID_HEIGHT     4
+#define SUCCESSORS_SIZE 16
+
+#define J(n)         (n%10)        // column in the grid
+#define I(n)         ((n-J(n))/10) // row in the grid
+#define SUCCESSOR(n) successors[GRID_WIDTH * (I(n)-1) + (J(n)-1)]
+
+var ushort[SUCCESSORS_SIZE] successors;
+loop i, SUCCESSORS_SIZE do
+    successors[i] = UNREACHABLE;
+end
+SUCCESSOR(id) = SELF;
+SUCCESSOR(12) = id;
 
 // ----------------------------------------
 //
@@ -85,7 +103,20 @@ with
             request.destination = 12; // arbitrary
             request.source = id;
             request.type = TEMPERATURE_REQUEST;
-            request.target = 12; // TODO
+            
+            var ushort node = SUCCESSOR(request.destination);
+            if node == UNREACHABLE then // invalid
+                return 1;
+            else/if node == SELF then   // invalid
+                return 1;
+            else/if node == PARENT then // invalid
+                return 1;
+            else/if node == id then // the target is one of my direct successors
+                request.target = request.destination;
+            else                    // the target is reachable through "node"
+                request.target = node;
+            end
+
             LED_SEND(ALL, request);
         end
         await 5s;
