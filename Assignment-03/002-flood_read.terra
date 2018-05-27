@@ -3,133 +3,178 @@
 #define FLOOD_TYPE 3
 #define ALARM_TYPE 5
 
-var ushort id = getNodeId();
+var ushort node_id = getNodeId();
 
-var ushort initialRoute = 0;
+var ushort initial_route = 0;
 
-pktype floodMsg from radioMsg with
-    var ushort origin; // parent node id
-    var ushort route;  // current known route
-    var ushort jumps;  // current number of jumps to root
+pktype t_msg from radioMsg with
+    var ushort ushort_01; // parent node id OR // node that measured the temp value
+    var ushort ushort_02;  // current known route OR // temperature value
+    var ushort ushort_03;  // current number of jumps to root
 end
 
-pktype alarmMsg from radioMsg with
-    var ushort node; // node that measured the temp value
-    var ushort temp; // temperature value
-end
-
-var floodMsg currentFlood;
-var alarmMsg alr;
+var t_msg msg_flood;
+var t_msg msg_radio;
 
 var ubyte stat;
+var ubyte ack;
 
-if id == 11 then //Is gateway
-    currentFlood.route = initialRoute;
+
+if node_id == 11 then //Is gateway
+/*
+ * This is the code running on the gateway node (11)
+ */
     par do
-        loop do
-            alr = await RECEIVE(ALARM_TYPE);
-            stat = qPut(alr);
-            emit LEDS(7);
-            await 1s;
-            emit LEDS(0);
-        end
-    with
+    /* Flood the network to make paths */
+        msg_flood.ushort_02 = initial_route;
         loop do
             //flood every 1min
-            currentFlood.origin = id;
-            currentFlood.route = currentFlood.route + 1;
-            currentFlood.jumps = 0;
-            currentFlood.source = id;
-            currentFlood.type = FLOOD_TYPE;
-            currentFlood.target = BROADCAST;
+            msg_flood.ushort_01 = node_id;
+            msg_flood.ushort_02 = msg_flood.ushort_02 + 1;
+            msg_flood.ushort_03 = 0;
+            msg_flood.source = node_id;
+            msg_flood.type = FLOOD_TYPE;
+            msg_flood.target = BROADCAST;
+            emit LEDS(0);
             emit LEDS(7);
-            emit SEND(currentFlood);
-            await SEND_DONE;
+            stat = qPut(msg_flood);
             emit LEDS(0);
             await 1min;
         end
     with
+    /* Receive alarm */
+        loop do
+            // receive alarm msg (we need to send it to node 1)
+            msg_radio = await RECEIVE(ALARM_TYPE);
+            stat = qPut(msg_radio);
+        end
+    with
+    /* Send message */
         loop do
             await Q_READY;
             loop do
-                stat = qGet(alr);
-                alr.target = 1;
-                emit SEND(alr);
-                await SEND_DONE;
-                emit LEDS(4);
-                await 2s;
-                emit LEDS(0);
-                if qSize() == 0 then
+                if qSize() > 0 then
+                    stat = qGet(msg_radio);
+                    
+                    if msg_radio.target == BROADCAST then
+                    /* this is a flood message and we just send it */
+                        emit SEND(msg_radio);
+                        await SEND_DONE(msg_radio.type);
+                    else
+                        loop do
+                        /* this is an alarm message and we need to send it to node 1 (tossam serial reader) */
+                            msg_radio.target = 1;
+                            msg_radio.ushort_03 = 99;
+                            emit SEND_ACK(msg_radio);
+                            ack = await SEND_DONE_ACK(msg_radio.type);
+                            emit LEDS(0);
+                            emit LEDS(1);
+                            await 1s;
+                            emit LEDS(0);
+                            if ack == TRUE then
+                                break;
+                            end
+                            await 50ms;
+                        end
+                    end
+                else
                     break;
                 end
             end
         end
     end
+
+/*----------------------------------------------------------------------------*/
+
 else //everyone else
-    //respond to flood
-    currentFlood.route = initialRoute;
-    currentFlood.source = id;
-    var floodMsg rec;
-    var alarmMsg myAlarm;
-    var ushort tv;
-    var ushort pv; //DEBUG
+/* This is the code running on all other nodes */
+    var t_msg received;
+    var t_msg my_alarm;
+    var ushort temp_value;
+    var ushort photo_value; //DEBUG
+    
     par do
+    /* Respond to flood */
+        msg_flood.ushort_02 = initial_route;
+        msg_flood.source = node_id;
+
         loop do
-            rec = await RECEIVE(FLOOD_TYPE);
+            received = await RECEIVE(FLOOD_TYPE);
             emit REQ_PHOTO(); //DEBUG
-            pv = await PHOTO; //DEBUG
-            if pv <= 400 then //DEBUG
-                if rec.route > currentFlood.route then // send to others
-                    emit LEDS(currentFlood.route); //DEBUG
-                    currentFlood.origin = rec.source;
-                    currentFlood.jumps = rec.jumps + 1;
-                    currentFlood.route = rec.route;
-                    currentFlood.type = FLOOD_TYPE;
-                    currentFlood.target = BROADCAST;
-                    emit SEND(currentFlood);
-                    await SEND_DONE;
-                    emit LEDS(currentFlood.route); //DEBUG
+            photo_value = await PHOTO; //DEBUG
+            if photo_value <= 400 then //DEBUG
+                if received.ushort_02 > msg_flood.ushort_02 then // send to others
+                    msg_flood.ushort_01 = received.source;
+                    msg_flood.ushort_03 = received.ushort_03 + 1;
+                    msg_flood.ushort_02 = received.ushort_02;
+                    msg_flood.type = FLOOD_TYPE;
+                    msg_flood.target = BROADCAST;
+                    stat = qPut(msg_flood);
                 end
             end //DEBUG
         end
     with
+    /* Receive an alarm type message */
         loop do
-            alr = await RECEIVE(ALARM_TYPE);
-            stat = qPut(alr);
+            msg_radio = await RECEIVE(ALARM_TYPE);
+            msg_radio.type = ALARM_TYPE;
+            msg_radio.target = msg_flood.ushort_01;
+            stat = qPut(msg_radio);
         end
     with
         loop do
+            par/or do
+                await 30s;
+            with
+                await 10s;
+                emit REQ_TEMP();
+                temp_value = await TEMP;
+
+                if temp_value > 500 then
+                    emit LED2(ON);
+                    my_alarm.source = node_id;
+                    my_alarm.ushort_02 = temp_value;
+                    my_alarm.ushort_01 = node_id;
+                    my_alarm.type = ALARM_TYPE;
+                    my_alarm.target = msg_flood.ushort_01;
+                    stat = qPut(my_alarm);
+                else
+                    emit LED2(OFF);
+                end
+                await FOREVER;
+            end
+        end
+    with
+    /* Send message */
+        loop do
             await Q_READY;
             loop do
-                stat = qGet(alr);
-                alr.type = ALARM_TYPE;
-                alr.target = currentFlood.origin;
-                emit SEND(alr);
-                await SEND_DONE;
-                if qSize() == 0 then
+                if qSize() > 0 then
+                    stat = qGet(msg_radio);
+                    
+                    if msg_radio.target == BROADCAST then
+                    /* this is a flood message and we just send it */
+                        emit SEND(msg_radio);
+                        await SEND_DONE(msg_radio.type);
+                    else
+                        loop do
+                        /* this is an alarm message and we need to send it to node 1 (tossam serial reader) */
+                            emit SEND_ACK(msg_radio);
+                            ack = await SEND_DONE_ACK(msg_radio.type);
+                            emit LEDS(0);
+                            emit LEDS(1);
+                            await 1s;
+                            emit LEDS(0);
+                            if ack == TRUE then
+                                break;
+                            end
+                            await 50ms;
+                        end
+                    end
+                else
                     break;
                 end
             end
         end
-    with
-        loop do
-            emit REQ_TEMP();
-            tv = await TEMP;
-
-            if tv > 500 then
-                emit LED2(ON);
-                myAlarm.source = id;
-                myAlarm.temp = tv;
-                myAlarm.node = id;
-                myAlarm.type = ALARM_TYPE;
-                myAlarm.target = currentFlood.origin;
-                emit SEND(myAlarm);
-                await SEND_DONE;
-            else
-                emit LED2(OFF);
-            end
-            await 10s;
-        end
     end
 end
-
