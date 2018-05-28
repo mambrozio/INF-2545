@@ -130,7 +130,8 @@ else
             photo_value = await PHOTO; //DEBUG
             if photo_value <= 400 then //DEBUG
                 msg_radio.type = ALARM_TYPE;
-                msg_radio.target = msg_flood.ushort_01; //change target to my parent
+                //change target to my parent
+                msg_radio.target = msg_flood.ushort_01;
                 qPut(msg_radio);
             end
         end
